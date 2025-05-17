@@ -10,7 +10,7 @@ import torch
 from torch.utils.data.sampler import SubsetRandomSampler
 import torchvision
 
-def getSets(filteredClass = None, removeFiltered = True) :
+def getSets(filteredClass = None, removeFiltered = True, all=False) :
 	"""
 	Return a torch dataset
 	"""
@@ -26,14 +26,14 @@ def getSets(filteredClass = None, removeFiltered = True) :
 										torchvision.transforms.ToTensor(),
 										torchvision.transforms.Normalize((0.1307,), (0.3081,))
 								]))
-	
+
 	if filteredClass is not None :
 		
-		train_loader = torch.utils.data.DataLoader(train, batch_size=len(train))
+		train_loader = torch.utils.data.DataLoader(train, batch_size=len(train), num_workers=20, pin_memory=True)
 	
 		train_labels = next(iter(train_loader))[1].squeeze()
 		
-		test_loader = torch.utils.data.DataLoader(test, batch_size=len(test))
+		test_loader = torch.utils.data.DataLoader(test, batch_size=len(test), num_workers=20, pin_memory=True)
 	
 		test_labels = next(iter(test_loader))[1].squeeze()
 		
@@ -54,7 +54,7 @@ if __name__ == "__main__" :
 	#test getSets function
 	train, test = getSets(filteredClass = 3, removeFiltered = False)
 	
-	test_loader = torch.utils.data.DataLoader(test, batch_size=len(test))
+	test_loader = torch.utils.data.DataLoader(test, batch_size=len(test), num_workers=20, pin_memory=True)
 	
 	images, labels = next(iter(test_loader))
 	

@@ -1,0 +1,6 @@
+viExperiment.py:813: RuntimeWarning: More than 20 figures have been opened. Figures created through the pyplot interface (`matplotlib.pyplot.figure`) are retained until explicitly closed and may consume too much memory. (To control this warning, see the rcParam `figure.max_open_warning`).
+  plt.figure(figsize=(1.2 * len(labels), 4))
+
+real	24m58.705s
+user	25m22.715s
+sys	0m30.310s

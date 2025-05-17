@@ -1,0 +1,4 @@
+nohup bash -c '{ time python viExperiment.py --trainonly > viExperiment_train.log; } 2>&1' 
+nohup bash -c '{ time python3 viExperiment.py --trainonly --nepochs=1 --numnetworksEnsemble=2 --numnetworks=2 > viExperiment_testrun.log; } 2>&1' &
+
+nohup bash -c '{ time python viExperiment.py --trainonly > viExperiment_train.log; } 2>&1'

@@ -49,6 +49,47 @@ def getSets(filteredClass = None, removeFiltered = True, all=False) :
 	
 	return train, test
 
+
+def getSetsCIFAR(filteredClass = None, removeFiltered = True, all=False) :
+	"""
+	Return a torch dataset
+	"""
+	train = torchvision.datasets.CIFAR('./data/', train=True, download=True,
+								transform=torchvision.transforms.Compose([
+										torchvision.transforms.ToTensor(),
+										torchvision.transforms.Normalize((0.1307,), (0.3081,))
+								]))
+	
+	train = torchvision.datasets.CIFAR('./data/', train=True, download=True,
+							transform=torchvision.transforms.Compose([
+									torchvision.transforms.ToTensor(),
+									torchvision.transforms.Normalize((0.1307,), (0.3081,))
+							]))
+
+
+	if filteredClass is not None :
+		
+		train_loader = torch.utils.data.DataLoader(train, batch_size=len(train), num_workers=20, pin_memory=True)
+	
+		train_labels = next(iter(train_loader))[1].squeeze()
+		
+		test_loader = torch.utils.data.DataLoader(test, batch_size=len(test), num_workers=20, pin_memory=True)
+	
+		test_labels = next(iter(test_loader))[1].squeeze()
+		
+		if removeFiltered : 
+			trainIndices = torch.nonzero(train_labels != filteredClass).squeeze()
+			testIndices = torch.nonzero(test_labels != filteredClass).squeeze()
+		else :
+			trainIndices = torch.nonzero(train_labels == filteredClass).squeeze()
+			testIndices = torch.nonzero(test_labels == filteredClass).squeeze()
+		
+		train = torch.utils.data.Subset(train, trainIndices)
+		test = torch.utils.data.Subset(test, testIndices)
+	
+	return train, test
+
+
 if __name__ == "__main__" :
 	
 	#test getSets function

@@ -10,7 +10,6 @@ def saveBNNs(models, savedir) :
     for i, m in enumerate(models) :
         
         saveFileName = os.path.join(savedir, "BNN_model{}.pth".format(i))
-        
         torch.save({"model_state_dict": m.state_dict()}, os.path.abspath(saveFileName))
 
 def saveEnsemble(models, savedir):

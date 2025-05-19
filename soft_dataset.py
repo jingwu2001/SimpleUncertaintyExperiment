@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -33,8 +34,8 @@ class SoftDataset(data.Dataset):
         self,
         root: Path,
         split: str = "test",
-        transform: Callable | None = None,
-        target_transform: Callable | None = None,
+        transform: Optional[Callable] = None,
+        target_transform: Optional[Callable] = None,
     ) -> None:
         # Load the soft labels
         root = Path(root)
@@ -64,7 +65,9 @@ class SoftDataset(data.Dataset):
         self.target_transform = target_transform
         self.is_ood = False
 
-    def __getitem__(self, index: int) -> tuple[Image.Image, Tensor]:
+    # def __getitem__(self, index: int) -> tuple[Image.Image, Tensor]:
+    def __getitem__(self, index: int): # -> Tuple[Image, Tensor]:
+
         """Retrieves an item from the dataset.
 
         Args:
@@ -113,7 +116,9 @@ class SoftDataset(data.Dataset):
             for annotator in raw:
                 for entry in annotator["annotations"]:
                     # Add only valid annotations to table
-                    if (label := entry["class_label"]) is not None:
+                    label = entry["class_label"]
+                    if label is not None:
+                    # if (label := entry["class_label"]) is not None:
                         img_filepath.append(entry["image_path"])
                         labels.append(label)
 
@@ -129,13 +134,19 @@ class SoftDataset(data.Dataset):
             soft_labels = np.zeros(
                 (len(unique_img_file_path), len(unique_labels)), dtype=np.int64
             )
-            for filepath, classname in zip(img_filepath, labels, strict=True):
+
+            # for filepath, classname in zip(img_filepath, labels, strict=True):
+            for filepath, classname in zip(img_filepath, labels):
                 soft_labels[
                     file_path_to_img_id[filepath], class_name_to_label_id[classname]
                 ] += 1
 
+            # soft_labels = np.concatenate(
+            #     (soft_labels, soft_labels.argmax(axis=-1, keepdims=True)), axis=-1
+            # )
             soft_labels = np.concatenate(
-                (soft_labels, soft_labels.argmax(axis=-1, keepdims=True)), axis=-1
+                (soft_labels, soft_labels.argmax(axis=-1)[..., None]),
+                axis=-1
             )
             self.soft_labels = torch.from_numpy(soft_labels)
             self.file_path_to_img_id = file_path_to_img_id

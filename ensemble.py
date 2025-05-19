@@ -8,11 +8,11 @@ class DeterministicNet(nn.Module):
     """
     def __init__(
             self, 
-            in_channels: int = 3,
-            input_size: tuple[int,int] = (32, 32),
-            p_mc_dropout=None,
-            hidden_dim: int = 128,
-            num_classes: int = 10,
+            in_channels= 3,
+            input_size = (32, 32),
+            p_mc_dropout = None,
+            hidden_dim = 128,
+            num_classes = 10,
         ):
         super().__init__()
         self.p_mc_dropout = p_mc_dropout

@@ -23,8 +23,11 @@ from torch.utils.data import DataLoader
 import os
 
 import argparse as args
+import sys
 
-
+import numpy as np
+from sklearn.model_selection import StratifiedShuffleSplit
+from torch.utils.data import Subset, DataLoader
 
 
 if __name__ == "__main__" :
@@ -64,14 +67,17 @@ if __name__ == "__main__" :
     print(f"Using device: {device}")
 
     # ensure output folder exists
-    img_dir = "plots"
+    os.makedirs(args.savedir, exist_ok=True)
+    img_dir = args.savedir + '/' + "plots"
     os.makedirs(img_dir, exist_ok=True)
-    task_dir = args.dataset
-    os.makedir(task_dir, exist_ok=True)
+    task_dir = args.savedir + '/' + args.dataset
+    os.makedirs(task_dir, exist_ok=True)
     model_dir = "models"
     os.makedirs(task_dir + "/" + model_dir, exist_ok=True)
+    checkpoints_dir = task_dir + "/" + model_dir + "/checkpoints"
+    os.makedirs(checkpoints_dir, exist_ok=True)
 
-    sys.exit(0)
+    # sys.exit(0)
 
     plot_counter = 0
     def save_plot(name: str):
@@ -93,10 +99,27 @@ if __name__ == "__main__" :
     train_filtered, test_filtered = getSets(filteredClass = args.filteredclass, removeFiltered = False)
     
     N = len(train)
+    SEED = 1234                                    # pick any
+    import random
+    def seed_everything(seed=SEED):
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)           # if using CUDA
+
+    ###############################################
+    # 1.  FIRST RUN
+    ###############################################
+    seed_everything()
+
     
     train_loader = torch.utils.data.DataLoader(train, batch_size=args.nbatch)
     test_loader = torch.utils.data.DataLoader(test, batch_size=args.nbatch)
     
+    # make sure we're using the right dataset
+    test_data = next(iter(train_loader))
+    print(f"length of training dataset: {N}, input shape: {test_data[0].shape}, label shape: {test_data[1].shape}")
+    # sys.exit(0)
     batchLen = len(train_loader)
     digitsBatchLen = len(str(batchLen))
     
@@ -113,97 +136,407 @@ if __name__ == "__main__" :
         if args.dataset == "mnist":
             in_channels = 1
             input_size = (28, 28)
+
+            for i in np.arange(args.numnetworksBNN) :
+                print("Training model {}/{}:".format(i+1, args.numnetworksBNN))
+                
+                #Initialize the model
+                model = BayesianMnistNet(in_channels=in_channels, input_size=input_size, p_mc_dropout=None) #p_mc_dropout=None will disable MC-Dropout for this bnn, as we found out it makes learning much much slower.
+                model.to(device)
+                loss = torch.nn.NLLLoss(reduction='mean') #negative log likelihood will be part of the ELBO
+                
+                optimizer = Adam(model.parameters(), lr=args.learningrate)
+                optimizer.zero_grad()
+                
+                for n in np.arange(args.nepochs) :
+                    
+                    for batch_id, sampl in enumerate(train_loader) :
+                        
+                        images, labels = sampl
+                        
+                        images = images.to(device)
+                        labels = labels.to(device)
+                        
+                        pred = model(images, stochastic=True)
+                        
+                        logprob = loss(pred, labels)
+                        l = n_train*logprob
+                        
+                        modelloss = model.evalAllLosses()
+                        l += modelloss
+                        
+                        optimizer.zero_grad()
+                        l.backward()
+                        
+                        optimizer.step()
+                        
+
+                        print("\r", ("\tEpoch {}/{}: Train step {"+(":0{}d".format(digitsBatchLen))+"}/{} prob = {:.4f} model = {:.4f} loss = {:.4f}          ").format(
+                                                                                                        n+1, args.nepochs,
+                                                                                                        batch_id+1,
+                                                                                                        batchLen,
+                                                                                                        torch.exp(-logprob.detach().cpu()).item(),
+                                                                                                        modelloss.detach().cpu().item(),
+                                                                                                        l.detach().cpu().item()), end="")
+                print("")
+                bnn_models.append(model)
+
+            for i in np.arange(args.numnetworksEnsemble):
+                print("Training model {}/{}:".format(i+1, args.numnetworksEnsemble))
+                model = DeterministicNet(in_channels=in_channels, input_size=input_size, p_mc_dropout=None).to(device)
+                loss_fn = torch.nn.CrossEntropyLoss() 
+                optimizer = Adam(model.parameters(), lr=args.learningrate)
+                optimizer.zero_grad()
+
+                for n in np.arange(args.nepochs) :
+                    for  batch_id, sampl in enumerate(train_loader):
+                        images, labels = sampl
+                        images = images.to(device)
+                        labels = labels.to(device)
+                        pred = model(images)
+
+                        l = loss_fn(pred, labels)
+
+                        optimizer.zero_grad()
+                        l.backward()
+
+                        optimizer.step()
+                        print("\r", ("\tEpoch {}/{}: Train step {"+(":0{}d".format(digitsBatchLen))+"}/{} loss = {:.4f}          ").format(
+                                                                                    n+1, args.nepochs,
+                                                                                    batch_id+1,
+                                                                                    batchLen,
+                                                                                    l.detach().cpu().item()), end="")
+                print()
+
+                ens_models.append(model)
+
         elif args.dataset == "cifar10":
+
+            ###### prepare a validation dataset
+            if hasattr(train, "targets"):
+                print("training dataset is not a subset")
+                labels = np.array(train.targets)      # e.g. shape (N,)
+            else:
+                print("dataset is a subset")
+                # train_ds is a Subset, so grab labels via .dataset and .indices
+                base_labels = np.array(train.dataset.targets)
+                labels     = base_labels[train.indices]
+
+            # 3) Create the splitter
+            val_frac = 0.1
+            sss = StratifiedShuffleSplit(
+                n_splits=1,
+                test_size=val_frac,
+                random_state=42
+            )
+            # sys.exit(0)
+
+            # 4) Generate train/val indices
+            train_idx, val_idx = next(sss.split(np.zeros(len(labels)), labels))
+
+            # 5) Wrap in Subsets
+            train_split = Subset(train, train_idx)
+            val_split   = Subset(train, val_idx)
+            n_train = len(train_split)
+            print(len(train_split), len(val_split))
+            # sys.exit(0)
+            # 6) Build your loaders
+            train_loader = DataLoader(train_split, batch_size=args.nbatch, shuffle=True)
+            val_loader   = DataLoader(val_split,   batch_size=args.nbatch, shuffle=False)
+
+            #####
+            # val_loader_test = DataLoader(val_split, batch_size=len(val_split))
+            # labels = next(iter(val_loader_test))[1]
+            # counts = torch.bincount(labels)
+            # print(f"label counts: {counts}")  
+            ######
+
+
+            print(f"Train on {len(train_split)} samples, validate on {len(val_split)} samples")
+
             in_channels = 3
             input_size = (32, 32)
-    
-        for i in np.arange(args.numnetworksBNN) :
-            print("Training model {}/{}:".format(i+1, args.numnetworksBNN))
-            
-            #Initialize the model
-            model = BayesianMnistNet(in_channels=in_channels, input_size=input_size, p_mc_dropout=None) #p_mc_dropout=None will disable MC-Dropout for this bnn, as we found out it makes learning much much slower.
-            model.to(device)
-            loss = torch.nn.NLLLoss(reduction='mean') #negative log likelihood will be part of the ELBO
-            
-            optimizer = Adam(model.parameters(), lr=args.learningrate)
-            optimizer.zero_grad()
-            
-            for n in np.arange(args.nepochs) :
+            from torch.optim.lr_scheduler import StepLR
+
+            n_models = args.numnetworksBNN
+            n_epochs = args.nepochs
+
+            all_train_nll = []
+            all_train_kl  = []
+            all_train_acc = []
+            all_val_nll   = []
+            all_val_acc   = []
+
+            for i in range(args.numnetworksBNN):
+                train_nll_hist = []
+                train_kl_hist  = []
+                train_acc_hist = []
+                val_nll_hist   = []
+                val_acc_hist   = []
+                print(f"Training BNN model {i+1}/{args.numnetworksBNN}")
                 
-                for batch_id, sampl in enumerate(train_loader) :
+                # 1) initialize
+                model     = BayesianMnistNet(in_channels, input_size, p_mc_dropout=None)
+                model.to(device)
+                n_train   = len(train_loader.dataset)
+                loss_fn   = torch.nn.NLLLoss(reduction='mean')
+                optimizer = torch.optim.Adam(model.parameters(), lr=args.learningrate)
+                scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+                
+                # 2) per-epoch tracking
+                for epoch in range(1, args.nepochs+1):
+                    model.train()
+                    running_nll = 0.0
+                    running_kl  = 0.0
+                    running_correct = 0
                     
-                    images, labels = sampl
+                    for batch_id, (images, labels) in enumerate(train_loader, 1):
+                        images, labels = images.to(device), labels.to(device)
+                        
+                        # forward: stochastic=True samples weights once per batch
+                        pred = model(images, stochastic=True)
+                        logprob = loss_fn(pred, labels)
+                        l = N*logprob
+                        modelloss = model.evalAllLosses()
+                        l += modelloss
+                        optimizer.zero_grad()
+                        l.backward()
+                        optimizer.step()
+
+                        
+                        # accumulate for reporting
+                        running_nll    += logprob.item()  * images.size(0)
+                        running_kl     += modelloss.item()
+                        preds           = pred.argmax(dim=1)
+                        running_correct += (preds == labels).sum().item()
+                        
+                    # scheduler step & epoch metrics
+                    scheduler.step()
+                    avg_nll = running_nll / n_train
+                    avg_kl  = running_kl  / len(train_loader)
+                    acc     = running_correct / n_train
+
+                    train_nll_hist.append(avg_nll)
+                    train_kl_hist .append(avg_kl)
+                    train_acc_hist.append(acc)
+
+                    # Validation
+                    model.eval()
+                    val_nll = val_correct = 0
+                    with torch.no_grad():
+                        for images, labels in val_loader:
+                            lp = model(images.to(device), stochastic=True)
+                            l  = loss_fn(lp, labels.to(device))
+                            val_nll     += l.item() * images.size(0)
+                            val_correct += (lp.argmax(1)==labels.to(device)).sum().item()
+                    val_nll /= len(val_loader.dataset)
+                    val_acc  = val_correct / len(val_loader.dataset)
+                    val_nll_hist.append(val_nll)
+                    val_acc_hist.append(val_acc)
+
+                    if epoch % 1 == 0:
+                        saveFileName = os.path.join(checkpoints_dir, f"BNN_model_{i}_epoch{epoch:03d}.pth")
+                        torch.save({"model_state_dict": model.state_dict()}, os.path.abspath(saveFileName))
+                        torch.save({
+                            "epoch":   epoch+1,
+                            "opt":     optimizer.state_dict(),
+                            "sched":   scheduler.state_dict(),
+                            "rng_cpu": torch.get_rng_state(),
+                            "rng_cuda": torch.cuda.get_rng_state_all(),
+                        }, f"{checkpoints_dir}/bnn_ckpt{epoch}.pt")
+
+
+                        print(f"BNN Model {i}, Epoch {epoch}: train NLL={avg_nll:.4f}, acc={acc:.4f} │ val NLL={val_nll:.4f}, acc={val_acc:.4f}")
+
+                # — after all epochs ——
+                all_train_nll.append(train_nll_hist)
+                all_train_kl .append(train_kl_hist)
+                all_train_acc.append(train_acc_hist)
+                all_val_nll  .append(val_nll_hist)
+                all_val_acc  .append(val_acc_hist)
+
+                # 3) after training, switch to eval
+                model.eval()
+                bnn_models.append(model)
+
+            train_nll_arr = np.array(all_train_nll)
+            train_kl_arr  = np.array(all_train_kl)
+            train_acc_arr = np.array(all_train_acc)
+            val_nll_arr   = np.array(all_val_nll)
+            val_acc_arr   = np.array(all_val_acc)
+
+
+            metrics = {
+                "train_nll": train_nll_arr,   # (n_models, n_epochs)
+                "train_kl" : train_kl_arr,
+                "train_acc": train_acc_arr,
+                "val_nll"  : val_nll_arr,
+                "val_acc"  : val_acc_arr,
+            }
+
+            epochs = np.arange(1, metrics["train_nll"].shape[1] + 1)
+
+            # ------------------------------------------------------------------
+            # 2)   make one figure per metric ----------------------------------
+            # ------------------------------------------------------------------
+            for name, arr in metrics.items():
+                plt.figure(figsize=(6, 4))
+
+                # plot each model in light colour
+                for row in arr:
+                    plt.plot(epochs, row, alpha=0.25, linewidth=1)
+
+                # mean ± std envelope
+                mean = arr.mean(axis=0)
+                std  = arr.std(axis=0)
+                plt.fill_between(epochs, mean - std, mean + std, color="C0", alpha=0.2)
+                plt.plot(epochs, mean, color="C0", linewidth=2, label="mean ± std")
+
+                plt.xlabel("Epoch")
+                ylabel = "Accuracy" if "acc" in name else ("KL loss" if "kl" in name else "NLL loss")
+                plt.ylabel(ylabel)
+                plt.title(name.replace("_", " ").title())
+                plt.legend(frameon=False)
+                plt.grid(alpha=0.3)
+
+                save_plot("bnn_" + name)        # <- your helper
+                plt.close()
+
+
+
+
+            all_train_loss = []
+            all_train_acc = []
+            all_val_loss   = []
+            all_val_acc   = []
+
+            for i in np.arange(args.numnetworksEnsemble):
+                train_loss_hist = []
+                train_acc_hist  = []
+                val_loss_hist   = []
+                val_acc_hist   = []
+                print("Training model {}/{}:".format(i+1, args.numnetworksEnsemble))
+                model = DeterministicNet(in_channels=in_channels, input_size=input_size, p_mc_dropout=None).to(device)
+                loss_fn = torch.nn.CrossEntropyLoss() 
+                optimizer = torch.optim.SGD(
+                    model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4
+                )
+                scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 30, 0.1)
+
+                # (2) Training + validation
+                for epoch in range(1, args.nepochs+1):
+                    # — train —
+                    model.train()
+                    tloss = tcorrect = 0
+                    for x, y in train_loader:
+                        x,y = x.to(device), y.to(device)
+                        optimizer.zero_grad()
+                        out = model(x)
+                        loss = loss_fn(out, y)
+                        loss.backward()
+                        optimizer.step()
+
+                        tloss    += loss.item() * x.size(0)
+                        tcorrect += (out.argmax(1)==y).sum().item()
+
+                    tloss /= len(train_loader.dataset)
+                    tacc  = tcorrect / len(train_loader.dataset)
+
+                    # — validate —
+                    model.eval()
+                    vloss = vcorrect = 0
+                    with torch.no_grad():
+                        for x, y in val_loader:
+                            x,y = x.to(device), y.to(device)
+                            out = model(x)
+                            l   = loss_fn(out, y)
+                            vloss    += l.item() * x.size(0)
+                            vcorrect += (out.argmax(1)==y).sum().item()
+                    vloss /= len(val_loader.dataset)
+                    vacc  = vcorrect / len(val_loader.dataset)
+
+                    # — step scheduler & log —
+                    scheduler.step()
+                    lr = scheduler.get_last_lr()[0]
+
                     
-                    images = images.to(device)
-                    labels = labels.to(device)
-                    
-                    pred = model(images, stochastic=True)
-                    
-                    logprob = loss(pred, labels)
-                    l = N*logprob
-                    
-                    modelloss = model.evalAllLosses()
-                    l += modelloss
-                    
-                    optimizer.zero_grad()
-                    l.backward()
-                    
-                    optimizer.step()
-                    
 
-                    print("\r", ("\tEpoch {}/{}: Train step {"+(":0{}d".format(digitsBatchLen))+"}/{} prob = {:.4f} model = {:.4f} loss = {:.4f}          ").format(
-																									n+1, args.nepochs,
-																									batch_id+1,
-																									batchLen,
-																									torch.exp(-logprob.detach().cpu()).item(),
-																									modelloss.detach().cpu().item(),
-																									l.detach().cpu().item()), end="")
-            print("")
-            bnn_models.append(model)
+                    train_loss_hist.append(tloss)
+                    train_acc_hist.append(tacc)
+                    val_loss_hist.append(vloss)
+                    val_acc_hist.append(vacc)
 
-        for i in np.arange(args.numnetworksEnsemble):
-            print("Training model {}/{}:".format(i+1, args.numnetworksEnsemble))
-            model = DeterministicNet(in_channels=in_channels, input_size=input_size, p_mc_dropout=None).to(device)
-            loss_fn = torch.nn.CrossEntropyLoss() 
-            optimizer = Adam(model.parameters(), lr=args.learningrate)
-            optimizer.zero_grad()
+                    # Save models per 50 epoch
+                    if epoch % 1 == 0:
+                        saveFileName = os.path.join(checkpoints_dir, f"ENS_model_{i}_epoch{epoch:03d}.pth")
+                        torch.save({"model_state_dict": model.state_dict()}, os.path.abspath(saveFileName))
+                        torch.save({
+                            "epoch":   epoch+1,
+                            "opt":     optimizer.state_dict(),
+                            "sched":   scheduler.state_dict(),
+                            "rng_cpu": torch.get_rng_state(),
+                            "rng_cuda": torch.cuda.get_rng_state_all(),
+                        }, f"{checkpoints_dir}/ens_ckpt{epoch}.pt")
+                        print(f"ENS Model {i}, Epoch {epoch}: train loss={tloss:.4f}, acc={tacc:.4f} │ val loss={vloss:.4f}, acc={vacc:.4f}")
 
-            for n in np.arange(args.nepochs) :
-                for  batch_id, sampl in enumerate(train_loader):
-                    images, labels = sampl
-                    images = images.to(device)
-                    labels = labels.to(device)
-                    pred = model(images)
+                
+                all_train_loss.append(train_loss_hist)
+                all_train_acc.append(train_acc_hist)
+                all_val_loss.append(val_loss_hist)
+                all_val_acc.append(val_acc_hist)
+                ens_models.append(model)
 
-                    l = loss_fn(pred, labels)
+            # shapes  (n_models, n_epochs)
+            train_loss_arr = np.asarray(all_train_loss)
+            train_acc_arr  = np.asarray(all_train_acc)
+            val_loss_arr   = np.asarray(all_val_loss)
+            val_acc_arr    = np.asarray(all_val_acc)
 
-                    optimizer.zero_grad()
-                    l.backward()
+            metrics = {
+                "train_loss": train_loss_arr,   # (n_models, n_epochs)
+                "train_acc" : train_acc_arr,
+                "val_loss"  : val_loss_arr,
+                "val_acc"   : val_acc_arr,
+            }
 
-                    optimizer.step()
-                    print("\r", ("\tEpoch {}/{}: Train step {"+(":0{}d".format(digitsBatchLen))+"}/{} loss = {:.4f}          ").format(
-                                                                                n+1, args.nepochs,
-                                                                                batch_id+1,
-                                                                                batchLen,
-                                                                                l.detach().cpu().item()), end="")
-            print()
+            # ------------------------------------------------------------------
+            # 2)  plot one figure per metric -----------------------------------
+            # ------------------------------------------------------------------
+            for name, arr in metrics.items():
+                plt.figure(figsize=(6, 4))
 
-            ens_models.append(model)
+                # draw each model (faint)
+                for row in arr:
+                    plt.plot(epochs, row, alpha=0.25, linewidth=1)
 
+                # mean ± std
+                mean = arr.mean(0)
+                std  = arr.std(0)
+                plt.fill_between(epochs, mean - std, mean + std,
+                                color="C0", alpha=0.2)
+                plt.plot(epochs, mean, color="C0", linewidth=2,
+                        label="mean ± std")
 
+                plt.xlabel("Epoch")
+                ylabel = "Accuracy" if "acc" in name else "Loss"
+                plt.ylabel(ylabel)
+                plt.title(name.replace("_", " ").title())
+                plt.grid(alpha=0.3)
+                plt.legend(frameon=False)
+
+                save_plot(name)
+                plt.close()
 
 
     
     if args.savedir is not None :
-        utils.saveModels(bnn_models=bnn_models, ens_models=ens_models, savedir=args.savedir)
+        utils.saveModels(bnn_models=bnn_models, ens_models=ens_models, savedir=model_dir)
     
     print("FINISHED TRAINING WITHOUT ERRORS")
     
     if args.trainonly:
-        import sys
         sys.exit(0)
-    
-    import sys
+
 
     if args.advancedmetrics:
         pred_prob = {}

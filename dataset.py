@@ -13,7 +13,6 @@ import numpy as np
 import torch
 from torch.utils.data.sampler import SubsetRandomSampler
 import torchvision
-from untangle.utils.transform import create_transform
 
 from soft_dataset import SoftDataset, CIFAR10HCombinedLabels
 
@@ -69,7 +68,7 @@ def getSetsCIFAR(filteredClass = None, removeFiltered = True) :
 	Return a torch dataset (without OOD transformations)
 	"""
 	mean = 0.4914,0.4822,0.4465
-	std = 0.2023,0.1994,0.2010
+	std = 0.2023,0.1994,0.2010 # the values are from the commands from wandb, used by untangle authors
 	train_tf = torchvision.transforms.Compose([
 		torchvision.transforms.RandomCrop(32, padding=4),
 		torchvision.transforms.RandomHorizontalFlip(0.5),
@@ -109,7 +108,7 @@ def getSetsCIFAR(filteredClass = None, removeFiltered = True) :
 		# assert majority_vote == test_label, f"majority vote: {majority_vote}; test_label: {test_label}, {k}"
 		assert (np.array(test_img) == np.array(soft_img)).all()
 		c += 1
-	print(c)
+	# print(c)
 	# Assertions are true. So the images are exactly the same. Now we only have to put together the soft labels and the hard labels
 
 	soft_loader = torch.utils.data.DataLoader(soft_ds, batch_size=len(soft_ds), shuffle=False)
@@ -133,7 +132,7 @@ def getSetsCIFAR(filteredClass = None, removeFiltered = True) :
 	combined_labels = torch.cat([soft_in_test_order, hard_labels], dim=1)
 	test = CIFAR10HCombinedLabels(hard_ds, combined_labels)
 	
-	print(combined_labels.shape)  # should be (10000, 12)
+	# print(combined_labels.shape)  # should be (10000, 12)
 	
 	if filteredClass is not None :
 		

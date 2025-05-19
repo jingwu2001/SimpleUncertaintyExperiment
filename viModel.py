@@ -205,10 +205,10 @@ class MeanFieldGaussian2DConvolution(VIModule) :
         
 class BayesianMnistNet(VIModule):
     def __init__(self, 
-                 in_channels: int = 3,
-                 input_size: tuple[int,int] = (32, 32),
-                 hidden_dim: int = 128,
-                 num_classes: int = 10,
+                 in_channels=3,
+                 input_size=(32, 32),
+                 hidden_dim=128,
+                 num_classes=10,
                  convWPriorSigma = 1., 
                  convBPriorSigma = 5., 
                  linearWPriorSigma = 1., 

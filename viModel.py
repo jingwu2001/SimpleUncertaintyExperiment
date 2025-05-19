@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.nn.parameter import Parameter
 
 from torch.distributions.normal import Normal
+import torch.nn.functional as F
 
 class VIModule(nn.Module) :
     """
@@ -111,7 +112,7 @@ class MeanFieldGaussianFeedForward(VIModule) :
         
         self.sampleTransform(stochastic=stochastic)
         
-        return nn.functional.linear(x, self.samples['weights'], bias = self.samples['bias'] if self.has_bias else None)
+        return F.linear(x, self.samples['weights'], bias = self.samples['bias'] if self.has_bias else None)
     
     
 class MeanFieldGaussian2DConvolution(VIModule) :
@@ -190,11 +191,11 @@ class MeanFieldGaussian2DConvolution(VIModule) :
         
         if self.padding != 0 and self.padding != (0,0) :
             padkernel = (self.padding, self.padding, self.padding, self.padding) if isinstance(self.padding, int) else (self.padding[1], self.padding[1], self.padding[0], self.padding[0])
-            mx = nn.functional.pad(x, padkernel, mode=self.padding_mode, value=0)
+            mx = F.pad(x, padkernel, mode=self.padding_mode, value=0)
         else :
             mx = x
         
-        return nn.functional.conv2d(mx, 
+        return F.conv2d(mx, 
                               self.samples['weights'], 
                               bias = self.samples['bias'] if self.has_bias else None,
                               stride= self.stride, 
@@ -204,6 +205,10 @@ class MeanFieldGaussian2DConvolution(VIModule) :
         
 class BayesianMnistNet(VIModule):
     def __init__(self, 
+                 in_channels: int = 3,
+                 input_size: tuple[int,int] = (32, 32),
+                 hidden_dim: int = 128,
+                 num_classes: int = 10,
                  convWPriorSigma = 1., 
                  convBPriorSigma = 5., 
                  linearWPriorSigma = 1., 
@@ -214,7 +219,7 @@ class BayesianMnistNet(VIModule):
         
         self.p_mc_dropout = p_mc_dropout
         
-        self.conv1 = MeanFieldGaussian2DConvolution(1, 16, 
+        self.conv1 = MeanFieldGaussian2DConvolution(in_channels, 16, 
                                                     wPriorSigma = convWPriorSigma, 
                                                     bPriorSigma = convBPriorSigma, 
                                                     kernel_size=5,
@@ -224,31 +229,44 @@ class BayesianMnistNet(VIModule):
                                                     bPriorSigma = convBPriorSigma, 
                                                     kernel_size=5,
                                                     initPriorSigmaScale=1e-7)
-        self.linear1 = MeanFieldGaussianFeedForward(512, 128,
+        
+        # Make a dummy pass to know the dimension of input to fc1
+        with torch.no_grad():
+            H, W = input_size
+            dummy = torch.zeros(1, in_channels, H, W)
+            x = F.max_pool2d(self.conv1(dummy), 2)
+            x = F.relu(x)
+            x = F.max_pool2d(self.conv2(x), 2)
+            x = F.relu(x)
+            n_flat = x.view(1, -1).size(1)
+
+
+
+        self.linear1 = MeanFieldGaussianFeedForward(n_flat, hidden_dim,
                                                     weightPriorSigma = linearWPriorSigma, 
                                                     biasPriorSigma = linearBPriorSigma,
                                                     initPriorSigmaScale=1e-7)
-        self.linear2 = MeanFieldGaussianFeedForward(128, 10,
+        self.linear2 = MeanFieldGaussianFeedForward(hidden_dim, num_classes,
                                                     weightPriorSigma = linearWPriorSigma, 
                                                     biasPriorSigma = linearBPriorSigma,
                                                     initPriorSigmaScale=1e-7)
 
     def forward(self, x, stochastic=True):
         
-        x = nn.functional.relu(nn.functional.max_pool2d(self.conv1(x, stochastic=stochastic), 2))
+        x = F.relu(F.max_pool2d(self.conv1(x, stochastic=stochastic), 2))
         x = self.conv2(x, stochastic=stochastic)
         
         if self.p_mc_dropout is not None :
-            x = nn.functional.dropout2d(x, p = self.p_mc_dropout, training=stochastic) #MC-Dropout
+            x = F.dropout2d(x, p = self.p_mc_dropout, training=stochastic) #MC-Dropout
         
-        x = nn.functional.relu(nn.functional.max_pool2d(x, 2))
+        x = F.relu(F.max_pool2d(x, 2))
         
-        x = x.view(-1, 512)
+        x = x.view(-1, self.linear1.in_features)
         
-        x = nn.functional.relu(self.linear1(x, stochastic=stochastic))
+        x = F.relu(self.linear1(x, stochastic=stochastic))
         
         if self.p_mc_dropout is not None :
-            x = nn.functional.dropout(x, p = self.p_mc_dropout, training=stochastic) #MC-Dropout
+            x = F.dropout(x, p = self.p_mc_dropout, training=stochastic) #MC-Dropout
         
         x = self.linear2(x, stochastic=stochastic)
-        return nn.functional.log_softmax(x, dim=-1)
+        return F.log_softmax(x, dim=-1)

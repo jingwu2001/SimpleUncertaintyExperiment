@@ -8,6 +8,8 @@ Created on Mon May 17 16:04:42 2021
 
 from dataset import getSets
 from viModel import BayesianMnistNet
+from ensemble import DeterministicNet
+import utils
 
 import numpy as np
 
@@ -22,101 +24,72 @@ import os
 
 import argparse as args
 
-from ensemble import MnistNet
 
-## put identify onto gpu
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
-def saveModels(models, savedir) :
-    
-    for i, m in enumerate(models) :
-        
-        saveFileName = os.path.join(savedir, "model{}.pth".format(i))
-        
-        torch.save({"model_state_dict": m.state_dict()}, os.path.abspath(saveFileName))
-
-def saveEnsemble(models, savedir):
-    for i, m in enumerate(models):
-        saveFileName = os.path.join(savedir, f"ensemble_model{i}.pth")
-        torch.save({"model_state_dict": m.state_dict()}, os.path.abspath(saveFileName))
-    
-def loadModels(savedir) :
-    
-    models = []
-    
-    for f in os.listdir(savedir) :
-        
-        model = BayesianMnistNet(p_mc_dropout=None)
-        model.to(device)		
-        model.load_state_dict(torch.load(os.path.abspath(os.path.join(savedir, f)))["model_state_dict"])
-        models.append(model)
-        
-    return models
-
-def loadEnsemble(savedir):
-    models = []
-    
-    for f in os.listdir(savedir) :
-        
-        model =MnistNet(p_mc_dropout=None)
-        model.to(device)		
-        model.load_state_dict(torch.load(os.path.abspath(os.path.join(savedir, f)))["model_state_dict"])
-        models.append(model)
-        
-    return models
-
-# ensure output folder exists
-img_dir = "plots"
-os.makedirs(img_dir, exist_ok=True)
-
-plot_counter = 0
-def save_plot(name: str):
-    """
-    Saves the current figure to images/ as
-    01_name.png, 02_name.png, etc.
-    """
-    global plot_counter  # if inside a function; otherwise use `global plot_counter`
-    plot_counter += 1
-    # fname = f"{plot_counter:02d}_{name}.png"
-    fname = f"{name}.png"
-    path = os.path.join(img_dir, fname)
-    plt.savefig(path)
-    print(f" saved {path}")
 
 
 if __name__ == "__main__" :
     
     parser = args.ArgumentParser(description='Train a BNN on Mnist')
+
+    parser.add_argument('--dataset', default="mnist", help="Dataset to use. Options: mnist/cifar10")
     
     parser.add_argument('--filteredclass', type=int, default = 5, choices = [x for x in range(10)], help="The class to ignore during training")
     parser.add_argument('--testclass', type=int, default = 4, choices = [x for x in range(10)], help="The class to test against that is not the filtered class")
     
-    
     parser.add_argument('--savedir', default = "models", help="Directory where the models can be saved or loaded from")
+
     parser.add_argument('--notrain', action = "store_true", help="Load the models directly instead of training")
+    parser.add_argument('--notrainBNN', action = "store_true", help="Load the BNN models directly instead of training")
+    parser.add_argument('--notrainEnsemble', action = "store_true", help="Load the ensemble models directly instead of training")
     
     parser.add_argument('--nepochs', type=int, default = 10, help="The number of epochs to train for")
     parser.add_argument('--nbatch', type=int, default = 64, help="Batch size used for training")
     parser.add_argument('--nruntests', type=int, default = 50, help="The number of pass to use at test time for monte-carlo uncertainty estimation")
     parser.add_argument('--learningrate', type=float, default = 5e-3, help="The learning rate of the optimizer")
-    parser.add_argument('--numnetworks', type=int, default = 10, help="The number of BNN networks to train to make an ensemble")
 
-    parser.add_argument('--savedirEnsemble', default='modelsEnsemble', help='Directory where the ensemble members are stored and loaded')
-    parser.add_argument('--notrainEnsemble', action = "store_true", help="Load the ensemble models directly instead of training")
+    parser.add_argument('--numnetworksBNN', type=int, default = 10, help="The number of BNN networks to train to make an ensemble")
     parser.add_argument('--numnetworksEnsemble', type=int, default=5, help="The number of networks in the deterministic ensemble")
 
     parser.add_argument('--trainonly', action = "store_true", help="train the models and stop. No inference would be done if this is specified")
 
     parser.add_argument('--advancedmetrics', action="store_true", help="Calculate advanced metrics")
-    parser.add_argument('--testoutputdir', default="testpred", help="Directory for the predicitons on test set")
     parser.add_argument('--runtests', action="store_true", help='do inference on the test set')
     
     args = parser.parse_args()
     plt.rcParams["font.family"] = "serif"
+
+
+    ## put identify onto gpu
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # ensure output folder exists
+    img_dir = "plots"
+    os.makedirs(img_dir, exist_ok=True)
+    task_dir = args.dataset
+    os.makedir(task_dir, exist_ok=True)
+    model_dir = "models"
+    os.makedirs(task_dir + "/" + model_dir, exist_ok=True)
+
+    sys.exit(0)
+
+    plot_counter = 0
+    def save_plot(name: str):
+        """
+        Saves the current figure to images/ as
+        01_name.png, 02_name.png, etc.
+        """
+        global plot_counter  # if inside a function; otherwise use `global plot_counter`
+        plot_counter += 1
+        # fname = f"{plot_counter:02d}_{name}.png"
+        fname = f"{name}.png"
+        path = os.path.join(img_dir, fname)
+        plt.savefig(path)
+        print(f" saved {path}")
+
+
     
-    
-    train, test = getSets(filteredClass = args.filteredclass)
+    train, test = getSets(args.dataset, filteredClass = args.filteredclass)
     train_filtered, test_filtered = getSets(filteredClass = args.filteredclass, removeFiltered = False)
     
     N = len(train)
@@ -127,22 +100,28 @@ if __name__ == "__main__" :
     batchLen = len(train_loader)
     digitsBatchLen = len(str(batchLen))
     
-    models = []
-    ensemble_models = []
+    bnn_models = []
+    ens_models = []
     
     # Training or Loading
     if args.notrain :
         
-        models = loadModels(args.savedir)
-        ensemble_models = loadEnsemble(args.savedirEnsemble)
+        bnn_models = utils.loadBNNs(args.savedir)
+        ens_models = utils.loadEnsemble(args.savedir)
         
     else :
+        if args.dataset == "mnist":
+            in_channels = 1
+            input_size = (28, 28)
+        elif args.dataset == "cifar10":
+            in_channels = 3
+            input_size = (32, 32)
     
-        for i in np.arange(args.numnetworks) :
-            print("Training model {}/{}:".format(i+1, args.numnetworks))
+        for i in np.arange(args.numnetworksBNN) :
+            print("Training model {}/{}:".format(i+1, args.numnetworksBNN))
             
             #Initialize the model
-            model = BayesianMnistNet(p_mc_dropout=None) #p_mc_dropout=None will disable MC-Dropout for this bnn, as we found out it makes learning much much slower.
+            model = BayesianMnistNet(in_channels=in_channels, input_size=input_size, p_mc_dropout=None) #p_mc_dropout=None will disable MC-Dropout for this bnn, as we found out it makes learning much much slower.
             model.to(device)
             loss = torch.nn.NLLLoss(reduction='mean') #negative log likelihood will be part of the ELBO
             
@@ -180,11 +159,11 @@ if __name__ == "__main__" :
 																									modelloss.detach().cpu().item(),
 																									l.detach().cpu().item()), end="")
             print("")
-            models.append(model)
+            bnn_models.append(model)
 
         for i in np.arange(args.numnetworksEnsemble):
             print("Training model {}/{}:".format(i+1, args.numnetworksEnsemble))
-            model = MnistNet(p_mc_dropout=None).to(device)
+            model = DeterministicNet(in_channels=in_channels, input_size=input_size, p_mc_dropout=None).to(device)
             loss_fn = torch.nn.CrossEntropyLoss() 
             optimizer = Adam(model.parameters(), lr=args.learningrate)
             optimizer.zero_grad()
@@ -209,15 +188,14 @@ if __name__ == "__main__" :
                                                                                 l.detach().cpu().item()), end="")
             print()
 
-            ensemble_models.append(model)
+            ens_models.append(model)
 
 
 
 
     
     if args.savedir is not None :
-        saveModels(models, args.savedir)
-        saveEnsemble(ensemble_models, args.savedirEnsemble)
+        utils.saveModels(bnn_models=bnn_models, ens_models=ens_models, savedir=args.savedir)
     
     print("FINISHED TRAINING WITHOUT ERRORS")
     
@@ -241,19 +219,19 @@ if __name__ == "__main__" :
             # pred_prob['bnn'] = torch.zeros((args.nruntests, len(test_unfiltered), 10))
             # for i in np.arange(args.nruntests) :
             #     # print("\r", "\tTest run {}/{}".format(i+1, args.nruntests), end="")
-            #     model = np.random.randint(args.numnetworks)
+            #     model = np.random.randint(args.numnetworksBNN)
             #     model = models[model]
             #     output = torch.exp(model(images))
             #     pred_prob["bnn"][i, :, :] = output
             #     print(f"bnn: {i + 1}/{args.nruntests} models inferenced")
             
             # # Ensemble
-            # pred_prob['ens'] = torch.zeros((len(ensemble_models), len(test_unfiltered), 10))
+            # pred_prob['ens'] = torch.zeros((len(ens_models), len(test_unfiltered), 10))
 
-            # for i, m in enumerate(ensemble_models):
+            # for i, m in enumerate(ens_models):
             #     output = torch.nn.functional.softmax(m(images), dim=-1)
             #     pred_prob["ens"][i, :, :] = output
-            #     print(f"ensemble: {i + 1}/{len(ensemble_models)} models inferenced")
+            #     print(f"ensemble: {i + 1}/{len(ens_models)} models inferenced")
 
             # print(f'pred_prob["bnn"].shape: {pred_prob["bnn"].shape}')
             # print(f'pred_prob["ens"].shape: {pred_prob["ens"].shape}')
@@ -298,20 +276,20 @@ if __name__ == "__main__" :
             # ------------ BNN draws -------------------------------------------
             pred_prob['bnn'] = torch.zeros(args.nruntests, N, 10)
             for i in range(args.nruntests):
-                net = models[np.random.randint(args.numnetworks)]
+                net = bnn_models[np.random.randint(args.numnetworksBNN)]
                 probs = eval_on_loader(net, test_loader, device, transform=torch.exp)  # log-probs → probs
                 pred_prob['bnn'][i] = probs
                 print(f"bnn: {i+1}/{args.nruntests} models inferenced")
 
             # ------------ deterministic ensemble -------------------------------
-            pred_prob['ens'] = torch.zeros(len(ensemble_models), N, 10)
-            for i, m in enumerate(ensemble_models):
+            pred_prob['ens'] = torch.zeros(len(ens_models), N, 10)
+            for i, m in enumerate(ens_models):
                 probs = eval_on_loader(
                     m, test_loader, device,
                     transform=lambda x: torch.nn.functional.softmax(x, dim=-1)          # logits → probs
                 )
                 pred_prob['ens'][i] = probs
-                print(f"ensemble: {i+1}/{len(ensemble_models)} models inferenced")
+                print(f"ensemble: {i+1}/{len(ens_models)} models inferenced")
 
 
 
@@ -823,188 +801,3 @@ if __name__ == "__main__" :
         # ---------------------------------------------------------------------------
         plot_auc_bars(auc)
         sys.exit(0)
-
-
-
-
-    # Testing
-    if args.testclass != args.filteredclass :
-        
-        train_filtered_seen, test_filtered_seen = getSets(filteredClass = args.testclass, removeFiltered = False)
-        print("")
-        print("Testing against seen class:") # default: train on all classes except 3, and then test on 4
-        # print(f"len(test_filtered_seen): {len(test_filtered_seen)}") # size of the test set is 982 (982 examples)
-        
-        with torch.no_grad() :
-        
-            samples = torch.zeros((args.nruntests, len(test_filtered_seen), 10))
-            
-            test_loader = DataLoader(test_filtered_seen, batch_size=len(test_filtered_seen))
-            images, labels = next(iter(test_loader))
-            images = images.to(device)
-            labels = labels.to(device)
-            
-            for i in np.arange(args.nruntests) :
-                print("\r", "\tTest run {}/{}".format(i+1, args.nruntests), end="")
-                model = np.random.randint(args.numnetworks)
-                model = models[model]
-                output = torch.exp(model(images))
-                print(f"output for a single example: {output[0, :]}")
-                print(f"output.shape: {output.shape}")
-                samples[i, :, :] = output
-                # samples[i,:,:] = torch.exp(model(images))
-                print(f"samples.shape: {samples.shape}")
-                # print(samples[i, :, :])
-                sys.exit()
-        
-            print("")
-            
-            withinSampleMean = torch.mean(samples, dim=0)
-            samplesMean = torch.mean(samples, dim=(0,1))
-            
-            withinSampleStd = torch.sqrt(torch.mean(torch.var(samples, dim=0), dim=0))
-            acrossSamplesStd = torch.std(withinSampleMean, dim=0)
-            
-            print("")
-            print("Class prediction analysis:")
-            print("\tMean class probabilities:")
-            print(samplesMean)
-            print("\tPrediction standard deviation per sample:")
-            print(withinSampleStd)
-            print("\tPrediction standard deviation across samples:")
-            print(acrossSamplesStd)
-        
-            plt.figure("Seen class probabilities")
-            plt.bar(np.arange(10), samplesMean.numpy())
-            plt.xlabel('digits')
-            plt.ylabel('digit prob')	
-            plt.ylim([0,1])
-            plt.xticks(np.arange(10))
-            save_plot("1_Seen class probabilities.png")
-            
-            plt.figure("Seen inner and outter sample std")
-            plt.bar(np.arange(10)-0.2, withinSampleStd.numpy(), width = 0.4, label="Within sample")
-            plt.bar(np.arange(10)+0.2, acrossSamplesStd.numpy(), width = 0.4, label="Across samples")
-            plt.legend()
-            plt.xlabel('digits')
-            plt.ylabel('std digit prob')
-            plt.xticks(np.arange(10))
-            save_plot("2_Seen inner and outter sample std.png")
-    
-    
-    
-    
-    
-    print("")
-    print("Testing against unseen class:")
-    
-    with torch.no_grad() :
-    
-        samples = torch.zeros((args.nruntests, len(test_filtered), 10))
-        
-        test_loader = DataLoader(test_filtered, batch_size=len(test_filtered))
-        images, labels = next(iter(test_loader))
-        images = images.to(device)
-        labels = labels.to(device)
-        
-        for i in np.arange(args.nruntests) :
-            print("\r", "\tTest run {}/{}".format(i+1, args.nruntests), end="")
-            model = np.random.randint(args.numnetworks)
-            model = models[model]
-            
-            samples[i,:,:] = torch.exp(model(images))
-    
-        print("")
-        
-        withinSampleMean = torch.mean(samples, dim=0)
-        samplesMean = torch.mean(samples, dim=(0,1))
-        
-        withinSampleStd = torch.sqrt(torch.mean(torch.var(samples, dim=0), dim=0))
-        acrossSamplesStd = torch.std(withinSampleMean, dim=0)
-        
-        print("")
-        print("Class prediction analysis:")
-        print("\tMean class probabilities:")
-        print(samplesMean)
-        print("\tPrediction standard deviation per sample:")
-        print(withinSampleStd)
-        print("\tPrediction standard deviation across samples:")
-        print(acrossSamplesStd)
-        
-        plt.figure("Unseen class probabilities")
-        plt.bar(np.arange(10), samplesMean.numpy())
-        plt.xlabel('digits')
-        plt.ylabel('digit prob')
-        plt.ylim([0,1])
-        plt.xticks(np.arange(10))
-        save_plot("3_Unseen class probabilities")
-        
-        plt.figure("Unseen inner and outter sample std")
-        plt.bar(np.arange(10)-0.2, withinSampleStd.numpy(), width = 0.4, label="Within sample")
-        plt.bar(np.arange(10)+0.2, acrossSamplesStd.numpy(), width = 0.4, label="Across samples")
-        plt.legend()
-        plt.xlabel('digits')
-        plt.ylabel('std digit prob')
-        plt.xticks(np.arange(10))
-        save_plot("4_Unseen inner and outter sample std")
-    
-    
-    
-    
-    
-    print("")
-    print("Testing against pure white noise:")
-    
-    with torch.no_grad() :
-    
-        l = 1000
-        
-        samples = torch.zeros((args.nruntests, l, 10))
-        
-        random = torch.rand((l,1,28,28))
-        random = random.to(device)
-        
-        for i in np.arange(args.nruntests) :
-            print("\r", "\tTest run {}/{}".format(i+1, args.nruntests), end="")
-            model = np.random.randint(args.numnetworks)
-            model = models[model]
-            
-            samples[i,:,:] = torch.exp(model(random))
-    
-        print("")
-        
-        withinSampleMean = torch.mean(samples, dim=0)
-        samplesMean = torch.mean(samples, dim=(0,1))
-        
-        withinSampleStd = torch.sqrt(torch.mean(torch.var(samples, dim=0), dim=0))
-        acrossSamplesStd = torch.std(withinSampleMean, dim=0)
-        
-        print("")
-        print("Class prediction analysis:")
-        print("\tMean class probabilities:")
-        print(samplesMean)
-        print("\tPrediction standard deviation per sample:")
-        print(withinSampleStd)
-        print("\tPrediction standard deviation across samples:")
-        print(acrossSamplesStd)
-        
-        plt.figure("White noise class probabilities")
-        plt.bar(np.arange(10), samplesMean.numpy())
-        plt.xlabel('digits')
-        plt.ylabel('digit prob')
-        plt.ylim([0,1])
-        plt.xticks(np.arange(10))
-        save_plot("5_White noise class probabilities")
-        
-        plt.figure("White noise inner and outter sample std")
-        plt.bar(np.arange(10)-0.2, withinSampleStd.numpy(), width = 0.4, label="Within sample")
-        plt.bar(np.arange(10)+0.2, acrossSamplesStd.numpy(), width = 0.4, label="Across samples")
-        plt.legend()
-        plt.xlabel('digits')
-        plt.ylabel('std digit prob')
-        plt.xticks(np.arange(10))
-        save_plot("6_White noise inner and outter sample std")
-        
-    plt.show()
-
-    print("FINISHED WITHOUT ERRORS")

@@ -47,6 +47,7 @@ if __name__ == "__main__" :
     
     parser.add_argument('--nepochs', type=int, default = 10, help="The number of epochs to train for")
     parser.add_argument('--nbatch', type=int, default = 64, help="Batch size used for training")
+    parser.add_argument('--numworkers', type=int, default=2, help="num_workers in DataLoader")
     parser.add_argument('--nruntests', type=int, default = 50, help="The number of pass to use at test time for monte-carlo uncertainty estimation")
     parser.add_argument('--learningrate', type=float, default = 5e-3, help="The learning rate of the optimizer")
 
@@ -57,6 +58,10 @@ if __name__ == "__main__" :
 
     parser.add_argument('--advancedmetrics', action="store_true", help="Calculate advanced metrics")
     parser.add_argument('--runtests', action="store_true", help='do inference on the test set')
+    parser.add_argument('--lrSGD', type=float, default=0.1, help="learning rate for SGD")
+
+    parser.add_argument('--checkpsteps', type=int, default=10, help="how many epochs between checkpoint savings")
+
     
     args = parser.parse_args()
     plt.rcParams["font.family"] = "serif"
@@ -72,9 +77,9 @@ if __name__ == "__main__" :
     os.makedirs(img_dir, exist_ok=True)
     task_dir = args.savedir + '/' + args.dataset
     os.makedirs(task_dir, exist_ok=True)
-    model_dir = "models"
-    os.makedirs(task_dir + "/" + model_dir, exist_ok=True)
-    checkpoints_dir = task_dir + "/" + model_dir + "/checkpoints"
+    model_dir = task_dir + '/' + "models"
+    os.makedirs(model_dir, exist_ok=True)
+    checkpoints_dir = model_dir + "/checkpoints"
     os.makedirs(checkpoints_dir, exist_ok=True)
 
     # sys.exit(0)
@@ -99,7 +104,7 @@ if __name__ == "__main__" :
     train_filtered, test_filtered = getSets(filteredClass = args.filteredclass, removeFiltered = False)
     
     N = len(train)
-    SEED = 1234                                    # pick any
+    SEED = 1235                                   # pick any
     import random
     def seed_everything(seed=SEED):
         random.seed(seed)
@@ -113,8 +118,8 @@ if __name__ == "__main__" :
     seed_everything()
 
     
-    train_loader = torch.utils.data.DataLoader(train, batch_size=args.nbatch)
-    test_loader = torch.utils.data.DataLoader(test, batch_size=args.nbatch)
+    train_loader = torch.utils.data.DataLoader(train, batch_size=args.nbatch, num_workers=args.numworkers)
+    test_loader = torch.utils.data.DataLoader(test, batch_size=args.nbatch, num_workers=args.numworkers)
     
     # make sure we're using the right dataset
     test_data = next(iter(train_loader))
@@ -160,7 +165,8 @@ if __name__ == "__main__" :
                         pred = model(images, stochastic=True)
                         
                         logprob = loss(pred, labels)
-                        l = n_train*logprob
+                        l = N*logprob
+                        
                         
                         modelloss = model.evalAllLosses()
                         l += modelloss
@@ -241,8 +247,8 @@ if __name__ == "__main__" :
             print(len(train_split), len(val_split))
             # sys.exit(0)
             # 6) Build your loaders
-            train_loader = DataLoader(train_split, batch_size=args.nbatch, shuffle=True)
-            val_loader   = DataLoader(val_split,   batch_size=args.nbatch, shuffle=False)
+            train_loader = DataLoader(train_split, batch_size=args.nbatch, shuffle=True, num_workers=args.numworkers)
+            val_loader   = DataLoader(val_split,   batch_size=args.nbatch, shuffle=False, num_workers=args.numworkers)
 
             #####
             # val_loader_test = DataLoader(val_split, batch_size=len(val_split))
@@ -296,7 +302,9 @@ if __name__ == "__main__" :
                         # forward: stochastic=True samples weights once per batch
                         pred = model(images, stochastic=True)
                         logprob = loss_fn(pred, labels)
-                        l = N*logprob
+                        l = (n_train / images.size(0)) * logprob
+                        # l = N*logprob
+
                         modelloss = model.evalAllLosses()
                         l += modelloss
                         optimizer.zero_grad()
@@ -334,7 +342,7 @@ if __name__ == "__main__" :
                     val_nll_hist.append(val_nll)
                     val_acc_hist.append(val_acc)
 
-                    if epoch % 1 == 0:
+                    if epoch % args.checkpsteps == 0:
                         saveFileName = os.path.join(checkpoints_dir, f"BNN_model_{i}_epoch{epoch:03d}.pth")
                         torch.save({"model_state_dict": model.state_dict()}, os.path.abspath(saveFileName))
                         torch.save({
@@ -343,7 +351,7 @@ if __name__ == "__main__" :
                             "sched":   scheduler.state_dict(),
                             "rng_cpu": torch.get_rng_state(),
                             "rng_cuda": torch.cuda.get_rng_state_all(),
-                        }, f"{checkpoints_dir}/bnn_ckpt{epoch}.pt")
+                        }, f"{checkpoints_dir}/bnn_ckpt{i}_{epoch}.pt")
 
 
                         print(f"BNN Model {i}, Epoch {epoch}: train NLL={avg_nll:.4f}, acc={acc:.4f} │ val NLL={val_nll:.4f}, acc={val_acc:.4f}")
@@ -402,6 +410,8 @@ if __name__ == "__main__" :
                 save_plot("bnn_" + name)        # <- your helper
                 plt.close()
 
+            if args.savedir is not None :
+                utils.saveBNNs(models=bnn_models, savedir=model_dir)
 
 
 
@@ -409,6 +419,7 @@ if __name__ == "__main__" :
             all_train_acc = []
             all_val_loss   = []
             all_val_acc   = []
+
 
             for i in np.arange(args.numnetworksEnsemble):
                 train_loss_hist = []
@@ -466,8 +477,8 @@ if __name__ == "__main__" :
                     val_loss_hist.append(vloss)
                     val_acc_hist.append(vacc)
 
-                    # Save models per 50 epoch
-                    if epoch % 1 == 0:
+                    # Save models per checkpsteps epoch
+                    if epoch % args.checkpsteps == 0:
                         saveFileName = os.path.join(checkpoints_dir, f"ENS_model_{i}_epoch{epoch:03d}.pth")
                         torch.save({"model_state_dict": model.state_dict()}, os.path.abspath(saveFileName))
                         torch.save({
@@ -527,6 +538,9 @@ if __name__ == "__main__" :
                 save_plot(name)
                 plt.close()
 
+            # Save models
+            if args.savedir is not None :
+                utils.saveEnsemble(models=ens_models, savedir=model_dir)
 
     
     if args.savedir is not None :

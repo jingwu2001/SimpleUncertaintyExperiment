@@ -89,7 +89,7 @@ def getSetsCIFAR(datadir = './data/', filteredClass = None, removeFiltered = Tru
 	
 	# two test datasets: one with hard label, one with soft labels
 	soft_ds = SoftDataset("CIFAR10H", split="all", transform=test_tf) # uses the SoftDataset class from untangle
-	hard_ds  = torchvision.datasets.CIFAR10(root="data", train=False, download=True, transform=test_tf)
+	hard_ds  = torchvision.datasets.CIFAR10(root=datadir, train=False, download=True, transform=test_tf)
 	
 
 	def name_to_test_id(name):

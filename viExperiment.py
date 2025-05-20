@@ -277,7 +277,8 @@ if __name__ == "__main__" :
             all_val_nll   = []
             all_val_acc   = []
 
-            sigmaScale = [1e-3, 1e-5, 1e-7]
+            sigmaScale = [0.1, 1e-3, 1e-5, 1e-7]
+
 
             if not args.notrainBNN:
                 for i in range(args.numnetworksBNN):

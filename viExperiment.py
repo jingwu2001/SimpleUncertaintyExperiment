@@ -512,7 +512,7 @@ if __name__ == "__main__" :
                     "val_loss"  : val_loss_arr,
                     "val_acc"   : val_acc_arr,
                 }
-                epochs = np.arange(1, metrics["train_nll"].shape[1] + 1)
+                epochs = np.arange(1, metrics["train_loss"].shape[1] + 1)
                 # ------------------------------------------------------------------
                 # 2)  plot one figure per metric -----------------------------------
                 # ------------------------------------------------------------------

@@ -212,7 +212,8 @@ class BayesianMnistNet(VIModule):
                  convWPriorSigma = 1., 
                  convBPriorSigma = 5., 
                  linearWPriorSigma = 1., 
-                 linearBPriorSigma = 5., 
+                 linearBPriorSigma = 5.,
+                 initPriorSigmaScale=1e-7, 
                  p_mc_dropout = 0.5) :
         
         super().__init__()
@@ -223,12 +224,12 @@ class BayesianMnistNet(VIModule):
                                                     wPriorSigma = convWPriorSigma, 
                                                     bPriorSigma = convBPriorSigma, 
                                                     kernel_size=5,
-                                                    initPriorSigmaScale=1e-7)
+                                                    initPriorSigmaScale=initPriorSigmaScale)
         self.conv2 = MeanFieldGaussian2DConvolution(16, 32, 
                                                     wPriorSigma = convWPriorSigma, 
                                                     bPriorSigma = convBPriorSigma, 
                                                     kernel_size=5,
-                                                    initPriorSigmaScale=1e-7)
+                                                    initPriorSigmaScale=initPriorSigmaScale)
         
         # Make a dummy pass to know the dimension of input to fc1
         with torch.no_grad():
@@ -245,11 +246,11 @@ class BayesianMnistNet(VIModule):
         self.linear1 = MeanFieldGaussianFeedForward(n_flat, hidden_dim,
                                                     weightPriorSigma = linearWPriorSigma, 
                                                     biasPriorSigma = linearBPriorSigma,
-                                                    initPriorSigmaScale=1e-7)
+                                                    initPriorSigmaScale=initPriorSigmaScale)
         self.linear2 = MeanFieldGaussianFeedForward(hidden_dim, num_classes,
                                                     weightPriorSigma = linearWPriorSigma, 
                                                     biasPriorSigma = linearBPriorSigma,
-                                                    initPriorSigmaScale=1e-7)
+                                                    initPriorSigmaScale=initPriorSigmaScale)
 
     def forward(self, x, stochastic=True):
         

@@ -50,7 +50,7 @@ if __name__ == "__main__" :
     parser.add_argument('--nbatch', type=int, default = 64, help="Batch size used for training")
     parser.add_argument('--numworkers', type=int, default=2, help="num_workers in DataLoader")
     parser.add_argument('--nruntests', type=int, default = 50, help="The number of pass to use at test time for monte-carlo uncertainty estimation")
-    parser.add_argument('--learningrate', type=float, default = 5e-3, help="The learning rate of the optimizer")
+    parser.add_argument('--learningrate', type=float, default = 1e-3, help="The learning rate of the optimizer")
 
     parser.add_argument('--numnetworksBNN', type=int, default = 10, help="The number of BNN networks to train to make an ensemble")
     parser.add_argument('--numnetworksEnsemble', type=int, default=5, help="The number of networks in the deterministic ensemble")
@@ -63,6 +63,8 @@ if __name__ == "__main__" :
 
     parser.add_argument('--checkpsteps', type=int, default=10, help="how many epochs between checkpoint savings")
 
+    parser.add_argument('--step_size', type=int, default=30, help="step size in stepLR")
+    parser.add_argument('--gamma', type=float, default=0.1, help='gamma in steplr')
     
     args = parser.parse_args()
     plt.rcParams["font.family"] = "serif"
@@ -275,8 +277,11 @@ if __name__ == "__main__" :
             all_val_nll   = []
             all_val_acc   = []
 
+            sigmaScale = [1e-3, 1e-5, 1e-7]
+
             if not args.notrainBNN:
                 for i in range(args.numnetworksBNN):
+                    
                     train_nll_hist = []
                     train_kl_hist  = []
                     train_acc_hist = []
@@ -285,12 +290,12 @@ if __name__ == "__main__" :
                     print(f"Training BNN model {i+1}/{args.numnetworksBNN}")
                     
                     # 1) initialize
-                    model     = BayesianMnistNet(in_channels, input_size, p_mc_dropout=None)
+                    model     = BayesianMnistNet(in_channels, input_size, p_mc_dropout=None, initPriorSigmaScale=sigmaScale[i])
                     model.to(device)
                     n_train   = len(train_loader.dataset)
                     loss_fn   = torch.nn.NLLLoss(reduction='mean')
                     optimizer = torch.optim.Adam(model.parameters(), lr=args.learningrate)
-                    scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+                    scheduler = StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
                     
                     # 2) per-epoch tracking
                     for epoch in range(1, args.nepochs+1):

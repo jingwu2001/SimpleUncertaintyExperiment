@@ -39,6 +39,7 @@ if __name__ == "__main__" :
     parser.add_argument('--filteredclass', type=int, default = 5, choices = [x for x in range(10)], help="The class to ignore during training")
     parser.add_argument('--testclass', type=int, default = 4, choices = [x for x in range(10)], help="The class to test against that is not the filtered class")
     
+    parser.add_argument('--datadir', default = './data/', help="Direcctory where CIFAR10/MNIST data is downloaded")
     parser.add_argument('--savedir', default = "models", help="Directory where the models can be saved or loaded from")
 
     parser.add_argument('--notrain', action = "store_true", help="Load the models directly instead of training")
@@ -100,8 +101,8 @@ if __name__ == "__main__" :
 
 
     
-    train, test = getSets(args.dataset, filteredClass = args.filteredclass)
-    train_filtered, test_filtered = getSets(filteredClass = args.filteredclass, removeFiltered = False)
+    train, test = getSets(args.dataset, datadir=args.datadir, filteredClass = args.filteredclass)
+    train_filtered, test_filtered = getSets(args.dataset, datadir=args.datadir, filteredClass = args.filteredclass, removeFiltered = False)
     
     N = len(train)
     SEED = 1235                                   # pick any
@@ -556,7 +557,7 @@ if __name__ == "__main__" :
         pred_prob = {}
 
         if args.runtests:
-            train_unfiltered, test_unfiltered = getSets(filteredClass=None) # all data
+            train_unfiltered, test_unfiltered = getSets(datadir=args.datadir, filteredClass=None) # all data
             assert len(test_unfiltered) == 10000
             # test_unfiltered_loader = DataLoader(test_unfiltered, batch_size=len(test_unfiltered))
             # images, labels = next(iter(test_unfiltered_loader))

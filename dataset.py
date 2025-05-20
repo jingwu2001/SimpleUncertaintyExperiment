@@ -17,24 +17,24 @@ import torchvision
 from soft_dataset import SoftDataset, CIFAR10HCombinedLabels
 
 
-def getSets(name='mnist', filteredClass=None, removeFiltered=True):
+def getSets(name='mnist', datadir='./data/', filteredClass=None, removeFiltered=True):
 	if name == 'mnist':
-		return getSetsMNIST(filteredClass=filteredClass, removeFiltered=removeFiltered)
+		return getSetsMNIST(datadir=datadir, filteredClass=filteredClass, removeFiltered=removeFiltered)
 	elif name == "cifar10":
-		return getSetsCIFAR(filteredClass=filteredClass, removeFiltered=removeFiltered)
+		return getSetsCIFAR(datadir=datadir, filteredClass=filteredClass, removeFiltered=removeFiltered)
 
-def getSetsMNIST(filteredClass = None, removeFiltered = True) :
+def getSetsMNIST(datadir='./data/', filteredClass = None, removeFiltered = True) :
 	"""
 	Return a torch dataset
 	"""
 	
-	train = torchvision.datasets.MNIST('./data/', train=True, download=True,
+	train = torchvision.datasets.MNIST(datadir, train=True, download=True,
 								transform=torchvision.transforms.Compose([
 										torchvision.transforms.ToTensor(),
 										torchvision.transforms.Normalize((0.1307,), (0.3081,))
 								]))
 
-	test = torchvision.datasets.MNIST('./data/', train=False, download=True,
+	test = torchvision.datasets.MNIST(datadir, train=False, download=True,
 								transform=torchvision.transforms.Compose([
 										torchvision.transforms.ToTensor(),
 										torchvision.transforms.Normalize((0.1307,), (0.3081,))
@@ -63,7 +63,7 @@ def getSetsMNIST(filteredClass = None, removeFiltered = True) :
 	return train, test
 
 
-def getSetsCIFAR(filteredClass = None, removeFiltered = True) :
+def getSetsCIFAR(datadir = './data/', filteredClass = None, removeFiltered = True) :
 	"""
 	Return a torch dataset (without OOD transformations)
 	"""
@@ -84,7 +84,7 @@ def getSetsCIFAR(filteredClass = None, removeFiltered = True) :
 
 
 
-	train = torchvision.datasets.CIFAR10('./data/', train=True, download=True,
+	train = torchvision.datasets.CIFAR10(datadir, train=True, download=True,
 								transform=train_tf)
 	
 	# two test datasets: one with hard label, one with soft labels

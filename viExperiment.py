@@ -69,6 +69,10 @@ if __name__ == "__main__" :
     args = parser.parse_args()
     plt.rcParams["font.family"] = "serif"
 
+    # print(f"learningrate: {args.learningrate}")
+    # print(f"step_size:    {args.step_size}")
+    # print(f"gamma:        {args.gamma}")
+
 
     ## put identify onto gpu
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -277,8 +281,10 @@ if __name__ == "__main__" :
             all_val_nll   = []
             all_val_acc   = []
 
-            sigmaScale = [0.1, 1e-3, 1e-5, 1e-7]
-
+            # sigmaScale = [0.1, 1e-3, 1e-5, 1e-7, 1e-9]
+            # sigmaScale=1e-7
+            lrs = [5e-3, 1e-3, 5e-4, 1e-4, 5e-5]
+            sigmaScale = 1e-7
 
             if not args.notrainBNN:
                 for i in range(args.numnetworksBNN):
@@ -289,14 +295,17 @@ if __name__ == "__main__" :
                     val_nll_hist   = []
                     val_acc_hist   = []
                     print(f"Training BNN model {i+1}/{args.numnetworksBNN}")
-                    
+                    print(f"sigmaScale: {sigmaScale}")
                     # 1) initialize
-                    model     = BayesianMnistNet(in_channels, input_size, p_mc_dropout=None, initPriorSigmaScale=sigmaScale[i])
+                    model     = BayesianMnistNet(in_channels, input_size, p_mc_dropout=None, initPriorSigmaScale=sigmaScale)
                     model.to(device)
                     n_train   = len(train_loader.dataset)
                     loss_fn   = torch.nn.NLLLoss(reduction='mean')
-                    optimizer = torch.optim.Adam(model.parameters(), lr=args.learningrate)
+                    # optimizer = torch.optim.Adam(model.parameters(), lr=args.learningrate)
+                    optimizer = torch.optim.Adam(model.parameters(), lr=lrs[i])
+                    print(f"learning rate: {lrs[i]}")
                     scheduler = StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
+                    print(f"step_size={args.step_size}, gamma={args.gamma}")
                     
                     # 2) per-epoch tracking
                     for epoch in range(1, args.nepochs+1):

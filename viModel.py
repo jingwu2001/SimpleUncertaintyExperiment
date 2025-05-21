@@ -81,7 +81,9 @@ class MeanFieldGaussianFeedForward(VIModule) :
         self.noiseSourceWeights = Normal(torch.zeros(out_features, int(in_features/groups)), 
                                    torch.ones(out_features, int(in_features/groups)))
         
-        self.addLoss(lambda s : 0.5*s.getSampledWeights().pow(2).sum()/weightPriorSigma**2)
+        # log (q(z)), used to estimate E_q [log (p(z))] in ELBO
+        self.addLoss(lambda s : 0.5*s.getSampledWeights().pow(2).sum()/weightPriorSigma**2) 
+        # log (q(z)), used to estimate E_q [log (q(z))] in ELBO
         self.addLoss(lambda s : -self.out_features/2*np.log(2*np.pi) - 0.5*s.samples['wNoiseState'].pow(2).sum() - s.lweights_sigma.sum())
         
         if self.has_bias :
